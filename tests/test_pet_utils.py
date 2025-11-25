@@ -93,3 +93,116 @@ def test_multi_run_pet_scans(multi_run_pet_scans):
             assert len(pet_image.parts) == len(anat_image.parts)
             assert re.search(r"ses-[^_|\/]*", str(anat_image))[0]  == re.search(r"ses-[^_|\/]*", str(pet_image))[0]
             assert re.search(r"nii|(.gz)", str(anat_image)) is not None
+
+# Multi-run versions of all tests
+def test_anat_in_no_session_folder_multi_run(anat_in_no_session_folder_multi_run):
+    subprocess.run(["tree", anat_in_no_session_folder_multi_run])
+    a_and_p = collect_anat_and_pet(anat_in_no_session_folder_multi_run)
+    
+    # Track number of runs detected
+    run_count = 0
+    
+    # check that for each pet file, there is a corresponding inherited anat file from the subject level
+    for subject in a_and_p.keys():
+        for pet_image, anat_image in a_and_p[subject].items():
+            pet_image = pathlib.Path(pet_image)
+            anat_image = pathlib.Path(anat_image)
+            # check that the pet image is at least a subfolder deeper than the anat image
+            assert len(pet_image.parts) > len(anat_image.parts)
+            assert re.search(r"ses-", str(anat_image)) is None
+            assert re.search(r"ses-", str(pet_image)) is not None
+            assert re.search(r"nii|(.gz)", str(anat_image)) is not None
+            # Verify run entity exists in PET filename
+            assert re.search(r"run-\d+", str(pet_image)) is not None
+            run_count += 1
+    
+    # Should have at least 2 runs (run-01 and run-02)
+    assert run_count >= 2
+
+def test_anat_in_first_session_folder_multi_run(anat_in_first_session_folder_multi_run):
+    subprocess.run(["tree", anat_in_first_session_folder_multi_run])
+    a_and_p = collect_anat_and_pet(anat_in_first_session_folder_multi_run)
+    
+    for subject in a_and_p.keys():
+        set_of_anat_images = set()
+        set_of_pet_images = set()
+        anat_exists_in_one_session_folder = False
+        run_count = 0
+        
+        for pet_image, anat_image in a_and_p[subject].items():
+            pet_image = pathlib.Path(pet_image)
+            anat_image = pathlib.Path(anat_image)
+
+            # add images to the set
+            set_of_anat_images.add(str(anat_image))
+            set_of_pet_images.add(str(pet_image))
+
+            # check that at least one session contains both a pet and an anat image
+            if re.search(r"ses-[^_|\/]*", str(anat_image))[0]  == re.search(r"ses-[^_|\/]*", str(pet_image))[0]:
+                anat_exists_in_one_session_folder = True
+            
+            # Verify run entity exists in PET filename
+            assert re.search(r"run-\d+", str(pet_image)) is not None
+            run_count += 1
+
+        assert anat_exists_in_one_session_folder is True
+        assert len(set_of_anat_images) == 1
+        # Should have multiple PET images due to runs
+        assert len(set_of_pet_images) >= 2
+        assert run_count >= 2
+
+def test_anat_in_first_session_folder_multi_sessions_multi_run(anat_in_first_session_folder_multi_sessions_multi_run):
+    subprocess.run(["tree", anat_in_first_session_folder_multi_sessions_multi_run])
+    a_and_p = collect_anat_and_pet(anat_in_first_session_folder_multi_sessions_multi_run)
+    
+    for subject in a_and_p.keys():
+        set_of_anat_images = set()
+        set_of_pet_images = set()
+        anat_exists_in_one_session_folder = False
+        run_count = 0
+        
+        for pet_image, anat_image in a_and_p[subject].items():
+            pet_image = pathlib.Path(pet_image)
+            anat_image = pathlib.Path(anat_image)
+
+            # add images to the set
+            set_of_anat_images.add(str(anat_image))
+            set_of_pet_images.add(str(pet_image))
+
+            # check that at least one session contains both a pet and an anat image
+            if re.search(r"ses-[^_|\/]*", str(anat_image))[0]  == re.search(r"ses-[^_|\/]*", str(pet_image))[0]:
+                anat_exists_in_one_session_folder = True
+            
+            # Verify run entity exists in PET filename
+            assert re.search(r"run-\d+", str(pet_image)) is not None
+            run_count += 1
+        
+        print("!"*100)
+        print(set_of_pet_images)
+        assert anat_exists_in_one_session_folder is True
+        assert len(set_of_anat_images) == 1
+        # Should have even more PET images (multiple sessions × multiple runs)
+        assert len(set_of_pet_images) >= 4  # 2 sessions × 2 runs
+        assert run_count >= 4
+
+def test_anat_in_each_session_folder_multi_run(anat_in_each_session_folder_multi_run):
+    subprocess.run(["tree", anat_in_each_session_folder_multi_run])
+    a_and_p = collect_anat_and_pet(anat_in_each_session_folder_multi_run)
+    
+    run_count = 0
+    
+    # check that for each pet file, there is a corresponding anat file in the same session
+    for subject in a_and_p.keys():
+        for pet_image, anat_image in a_and_p[subject].items():
+            pet_image = pathlib.Path(pet_image)
+            anat_image = pathlib.Path(anat_image)
+            # check that the pet image is at the same folder depth as the anat image
+            assert len(pet_image.parts) == len(anat_image.parts)
+            assert re.search(r"ses-[^_|\/]*", str(anat_image))[0]  == re.search(r"ses-[^_|\/]*", str(pet_image))[0]
+            assert re.search(r"nii|(.gz)", str(anat_image)) is not None
+            # Verify run entity exists in PET filename
+            assert re.search(r"run-\d+", str(pet_image)) is not None
+            run_count += 1
+    
+    # Should have multiple runs across sessions
+    assert run_count >= 4  # 2 sessions × 2 runs
