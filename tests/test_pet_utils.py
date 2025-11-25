@@ -82,4 +82,14 @@ def test_anat_in_each_session_folder(anat_in_each_session_folder):
             assert len(pet_image.parts) == len(anat_image.parts)
             assert re.search(r"ses-[^_|\/]*", str(anat_image))[0]  == re.search(r"ses-[^_|\/]*", str(pet_image))[0]
             assert re.search(r"nii|(.gz)", str(anat_image)) is not None
-    
+
+def test_multi_run_pet_scans(multi_run_pet_scans):
+    subprocess.run(["tree", multi_run_pet_scans])
+    a_and_p = collect_anat_and_pet(multi_run_pet_scans)
+    for subject in a_and_p.keys():
+        for pet_image, anat_image in a_and_p[subject].items():
+            pet_image = pathlib.Path(pet_image)
+            anat_image = pathlib.Path(anat_image)
+            assert len(pet_image.parts) == len(anat_image.parts)
+            assert re.search(r"ses-[^_|\/]*", str(anat_image))[0]  == re.search(r"ses-[^_|\/]*", str(pet_image))[0]
+            assert re.search(r"nii|(.gz)", str(anat_image)) is not None

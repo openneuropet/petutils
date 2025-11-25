@@ -2,6 +2,7 @@ import pathlib
 import pytest
 import shutil
 import tempfile
+import os
 
 # our first steps to testing are to build the different types of bids datasets that we expect to encounter
 # these are:
@@ -113,4 +114,27 @@ def anat_in_each_session_folder(tmpdir):
             / "anat"
             / file.name.replace("ses-baseline_", "ses-second_"),
         )
+    return dest_dir
+
+#5 - test dataset with multi run pet scans
+@pytest.fixture
+def multi_run_pet_scans(tmpdir):
+    dest_dir = pathlib.Path(tmpdir) / "multi_run_pet_scans"
+    shutil.copytree(data_dir, dest_dir)
+
+    runs = ["01", "02"]
+
+    for run in runs:
+        shutil.copy(
+            dest_dir / "sub-01" / "ses-baseline" / "pet" / "sub-01_ses-baseline_pet.nii.gz",
+            dest_dir / "sub-01" / "ses-baseline" / "pet" / f"sub-01_ses-baseline_run-{run}_pet.nii.gz",
+        )
+        shutil.copy(
+            dest_dir / "sub-01" / "ses-baseline" / "pet" / "sub-01_ses-baseline_pet.json",
+            dest_dir / "sub-01" / "ses-baseline" / "pet" / f"sub-01_ses-baseline_run-{run}_pet.json",
+        )
+    
+    os.remove(dest_dir / "sub-01" / "ses-baseline" / "pet" / "sub-01_ses-baseline_pet.nii.gz")
+    os.remove(dest_dir/ "sub-01" / "ses-baseline" / "pet" / "sub-01_ses-baseline_pet.json")
+
     return dest_dir
