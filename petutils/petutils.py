@@ -93,7 +93,7 @@ def collect_anat_and_pet(bids_data: Union[pathlib.Path, BIDSLayout], suffixes=["
         mapped_pet_to_anat[subject] = {}
     for subject in subjects:
         pet_files = bids_data.get(subject=subject, suffix="pet")
-        anat_files = [a.path for a in bids_data.get("anat",suffix=suffixes, subject=subject, extension=["nii", "nii.gz"])]
+        anat_files = [a.path for a in bids_data.get(suffix=suffixes, subject=subject, extension=["nii", "nii.gz"])]
         # for each pet image file we create an entry our mapping dictionary
         for entry in pet_files:
             if type(entry) is BIDSImageFile:
