@@ -10,6 +10,7 @@ authors = [
 dependencies = [
     "pybids>=0.16.3",
     "nipype>=1.8.6",
+    "nilearn>=0.12.1",
 ]
 
 [project.optional-dependencies]
@@ -24,3 +25,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["petutils"]
+
+[project.scripts]
+concat-niftis = "petutils.file_manipulations:concat_niftis_cli"
+niftifixer = "petutils.nifti_fixer:cli"
