@@ -164,7 +164,12 @@ def cli():
         default=False,
         help="Delete the original file",
     ),
-    parser.add_argument("--average_runs", action="store_true", default=False, help="Average together runs for mulitple T1w images")
+    parser.add_argument(
+        "--average_runs",
+        action="store_true",
+        default=False,
+        help="Average together runs for mulitple T1w images",
+    )
     args = parser.parse_args()
 
     nifti_path = pathlib.Path(args.path)

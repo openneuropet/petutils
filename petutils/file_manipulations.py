@@ -4,38 +4,44 @@ import re
 import os
 import json
 import argparse
+import tempfile
 from bids import BIDSLayout, BIDSValidator
 from bids.exceptions import BIDSValidationError
 from glob import glob
 from pathlib import Path
-from nilearn.image import concat_imgs
+import nibabel as nib
+import numpy as np
 from collections import defaultdict
 from typing import Literal
 from numpy import rec
-
+from nipype.interfaces.freesurfer import RobustRegister, ApplyVolTransform, Concatenate
 
 
 validator = BIDSValidator()
 
-def collect_runs(bids_dataset:str):
+
+def collect_runs(bids_dataset: str):
     bids_dataset = Path(bids_dataset)
     try:
         layout = BIDSLayout(bids_dataset.absolute().__str__())
         everything = layout.get()
         run_list = []
         for item in everything:
-            if item.get_entities().get('run', None):
+            if item.get_entities().get("run", None):
                 run_list.append(Path(item.path))
     except BIDSValidationError:
         # collect files that contain run
-        run_list = glob(f'{bids_dataset.absolute().__str__()}{os.sep}**{os.sep}*_run-*', recursive=True)
+        run_list = glob(
+            f"{bids_dataset.absolute().__str__()}{os.sep}**{os.sep}*_run-*",
+            recursive=True,
+        )
         run_list = [Path(run) for run in run_list]
-    
+
     grouped_runs = defaultdict(list)
     for run in run_list:
-        alike = re.sub(r'_run-\d+', '_run-XX', str(run))
+        alike = re.sub(r"_run-\d+", "_run-XX", str(run))
         grouped_runs[alike].append(run)
-    
+
     # sort runs
     for key in grouped_runs.keys():
         grouped_runs[key].sort()
@@ -51,7 +57,7 @@ def organize_by_extensions(grouped_runs: dict):
     :param grouped_runs: all BIDS files containing `run` in the filename.
     :type grouped_runs: dict
     """
-    extensions = ['tsv', 'json', 'nii']
+    extensions = ["tsv", "json", "nii"]
     if not grouped_runs:
         raise Exception(f"Must provide grouped_run")
 
@@ -59,12 +65,11 @@ def organize_by_extensions(grouped_runs: dict):
     for key in grouped_runs.keys():
         for f in grouped_runs[key]:
             match f:
-                case 'tsv':
-                    grouped_by_run_and_extension[k] 
-        
-        
-        
-def concat_sidecars(sidecar_jsons:list, set_time_zero=False):
+                case "tsv":
+                    grouped_by_run_and_extension[k]
+
+
+def concat_sidecars(sidecar_jsons: list, set_time_zero=False):
     set_time_zero = set_time_zero
     storage = {}
     # sort sidecar jsons
@@ -72,40 +77,137 @@ def concat_sidecars(sidecar_jsons:list, set_time_zero=False):
 
     # load each sidecar
     for s in sidecar_jsons:
-        with open(s, 'r') as infile:
+        with open(s, "r") as infile:
             storage[s] = json.load(infile)
     # verify timezero is the same for each sidecar json
     time_zero_set = set()
     for s, values in storage.items():
         time_zero_set.add((values.get("TimeZero")))
-    
-    if len(time_zero_set) > 1 and not set_time_zero:
-        raise Exception(f"Multiple TimeZero Values found for {sidecar_jsons.keys()}\nCall with set_time_zero=True to set TimeZero relative to first run.")
-    
 
-def concat_niftis(niftis:list, remove_original=False):
+    if len(time_zero_set) > 1 and not set_time_zero:
+        raise Exception(
+            f"Multiple TimeZero Values found for {sidecar_jsons.keys()}\nCall with set_time_zero=True to set TimeZero relative to first run."
+        )
+
+
+def _compute_mean_image(nifti_path: str, output_path: str) -> str:
+    """Compute temporal mean of a 4D image for registration."""
+    img = nib.load(nifti_path)
+    data = img.get_fdata()
+    if data.ndim == 4:
+        mean_data = np.mean(data, axis=3)
+    else:
+        mean_data = data
+    mean_img = nib.Nifti1Image(mean_data, img.affine, img.header)
+    mean_img.to_filename(output_path)
+    return output_path
+
+
+def _register_to_reference(moving_path: str, reference_path: str, workdir: str) -> str:
+    """
+    Register moving image to reference using FreeSurfer's mri_robust_register.
+    Returns path to the registered image.
+    """
+    moving_name = Path(moving_path).stem.replace(".nii", "")
+
+    # Compute mean images for registration (use temporal mean for 4D images)
+    ref_mean_path = os.path.join(workdir, "ref_mean.nii.gz")
+    mov_mean_path = os.path.join(workdir, f"{moving_name}_mean.nii.gz")
+
+    _compute_mean_image(reference_path, ref_mean_path)
+    _compute_mean_image(moving_path, mov_mean_path)
+
+    # Compute registration transform using mean images
+    lta_path = os.path.join(workdir, f"{moving_name}_to_ref.lta")
+
+    robust_reg = RobustRegister()
+    robust_reg.inputs.source_file = mov_mean_path
+    robust_reg.inputs.target_file = ref_mean_path
+    robust_reg.inputs.out_reg_file = lta_path
+    robust_reg.inputs.auto_sens = True  # Automatic sensitivity for robust registration
+    result = robust_reg.run()
+
+    # Apply transform to full 4D moving image
+    registered_path = os.path.join(workdir, f"{moving_name}_registered.nii.gz")
+
+    apply_vol = ApplyVolTransform()
+    apply_vol.inputs.source_file = moving_path
+    apply_vol.inputs.target_file = reference_path
+    apply_vol.inputs.reg_file = lta_path
+    apply_vol.inputs.transformed_file = registered_path
+    apply_vol.inputs.interp = "trilin"  # Trilinear interpolation
+    apply_vol.run()
+
+    return registered_path
+
+
+def concat_niftis(niftis: list, remove_original=False, register=False):
     # sort nifti list
     one_from_many = niftis
     one_from_many.sort()
-    one = concat_imgs(one_from_many)
-    # remove run from filename
-    new_file_name = re.sub(r'_run-\d+', '', str(niftis[0]))
-    # save output
-    one.to_filename(new_file_name)
+
+    # Determine output filename (remove run entity from first file)
+    new_file_name = re.sub(r"_run-\d+", "", str(niftis[0]))
+
+    if register:
+        # Use FreeSurfer registration to align images before concatenation
+        with tempfile.TemporaryDirectory() as workdir:
+            reference_path = one_from_many[0]
+            aligned_paths = [reference_path]
+
+            for moving_path in one_from_many[1:]:
+                registered_path = _register_to_reference(
+                    moving_path, reference_path, workdir
+                )
+                aligned_paths.append(registered_path)
+
+            # Load and concatenate registered images
+            imgs = [nib.load(f) for f in aligned_paths]
+            data_arrays = []
+            for img in imgs:
+                data = img.get_fdata()
+                if data.ndim == 3:
+                    data = data[..., np.newaxis]
+                data_arrays.append(data)
+
+            concatenated_data = np.concatenate(data_arrays, axis=3)
+            one = nib.Nifti1Image(concatenated_data, imgs[0].affine, imgs[0].header)
+            one.to_filename(new_file_name)
+    else:
+        # Direct concatenation using mri_concat (assumes aligned voxel grids)
+        concat = Concatenate()
+        concat.inputs.in_files = one_from_many
+        concat.inputs.concatenated_file = new_file_name
+        concat.run()
 
     if remove_original and Path(new_file_name).exists():
         [os.remove(str(orig)) for orig in niftis]
-    else:
-        Raise(f"Failed to save {new_file_name}, keeping original images {niftis}")
+    elif not Path(new_file_name).exists():
+        raise RuntimeError(
+            f"Failed to save {new_file_name}, keeping original images {niftis}"
+        )
 
     return new_file_name
+
 
 def concat_niftis_cli():
     parser = argparse.ArgumentParser()
     parser.add_argument("niftis", nargs="*")
-    parser.add_argument("-r", "--remove-original", help="Clean up old runs of nifti's, default behavior is to keep them.",
-    action="store_true", default=False)
+    parser.add_argument(
+        "-r",
+        "--remove-original",
+        help="Clean up old runs of nifti's, default behavior is to keep them.",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--register",
+        help="Use FreeSurfer mri_robust_register to align images before concatenation. "
+        "Computes rigid registration using temporal mean images.",
+        action="store_true",
+        default=False,
+    )
     args = parser.parse_args()
-    concat_niftis(**args)
-
-
+    concat_niftis(
+        args.niftis, remove_original=args.remove_original, register=args.register
+    )
